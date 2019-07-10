@@ -273,7 +273,6 @@ import (
 )
 `,
 	},
-
 	// Don't remove dot imports.
 	{
 		name: "dont_remove_dot_imports",
@@ -531,6 +530,7 @@ func main() {
 	},
 
 	// golang.org/issue/7132
+	// Updated by 20818: repair import grouping
 	{
 		name: "new_section_for_dotless_import",
 		in: `package main
@@ -552,7 +552,6 @@ c = fmt.Printf
 
 import (
 	"fmt"
-
 	"gu"
 
 	"manypackages.com/packagea"
@@ -622,6 +621,7 @@ func main() {
 
 	// Blank line can be added before all types of import declarations.
 	// golang.org/issue/7866
+	// Updated by 20818: repair import grouping
 	{
 		name: "new_section_for_all_kinds_of_imports",
 		in: `package main
@@ -643,15 +643,11 @@ var _, _, _, _, _ = fmt.Errorf, io.Copy, strings.Contains, renamed_packagea.A, B
 
 import (
 	"fmt"
-
-	renamed_packagea "manypackages.com/packagea"
-
 	"io"
-
-	. "manypackages.com/packageb"
-
 	"strings"
 
+	renamed_packagea "manypackages.com/packagea"
+	. "manypackages.com/packageb"
 	_ "manypackages.com/packagec"
 )
 
@@ -1153,6 +1149,157 @@ import "math/rand"
 var _, _ = rand.Read, rand.NewZipf
 `,
 	},
+
+	// Support repairing import grouping/ordering
+	// golang.org/issue/20818
+	{
+		name: "issue 20818",
+		in: `import (
+	"testing"
+
+	"github.com/Sirupsen/logrus"
+	"context"
+)
+
+func main() {
+	_, _, _ = testing.T, logrus.Entry, context.Context
+}
+`,
+		out: `package main
+
+import (
+	"context"
+	"testing"
+
+	"github.com/Sirupsen/logrus"
+)
+
+func main() {
+	_, _, _ = testing.T, logrus.Entry, context.Context
+}
+`,
+	},
+	{
+		name: "issue 20818 more groups",
+		in: `import (
+	"testing"
+	"k8s.io/apimachinery/pkg/api/meta"
+
+	"fmt"
+	"github.com/pkg/errors"
+
+	"golang.org/x/tools/cover"
+
+	"github.com/sirupsen/logrus"
+	"context"
+)
+
+func main() {
+	_, _, _, _, _, _ = testing.T, logrus.Entry, context.Context, meta.AnyGroup, fmt.Printf, errors.Frame
+}
+`,
+		out: `package main
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/api/meta"
+)
+
+func main() {
+	_, _, _, _, _, _ = testing.T, logrus.Entry, context.Context, meta.AnyGroup, fmt.Printf, errors.Frame
+}
+`,
+	},
+	{
+		name: "issue 20818 blank lines and single-line comments",
+		in: `import (
+
+
+	"testing"
+	"k8s.io/apimachinery/pkg/api/meta"
+
+	// a comment for the "fmt" package (#26921: they are broken, should be fixed)
+	"fmt"
+	"github.com/pkg/errors" // some comment
+
+
+	"golang.org/x/tools/cover"
+
+	"github.com/sirupsen/logrus"
+	"context"
+
+
+)
+
+func main() {
+	_, _, _, _, _, _ = testing.T, logrus.Entry, context.Context, meta.AnyGroup, fmt.Printf, errors.Frame
+}
+`,
+		out: `package main
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/pkg/errors" // some comment
+	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/api/meta" // a comment for the "fmt" package (#26921: they are broken, should be fixed)
+)
+
+func main() {
+	_, _, _, _, _, _ = testing.T, logrus.Entry, context.Context, meta.AnyGroup, fmt.Printf, errors.Frame
+}
+`,
+	},
+	{
+		name: "issue 20818 local packages",
+		in: `import (
+	"local/foo"
+	"testing"
+	"k8s.io/apimachinery/pkg/api/meta"
+
+	"fmt"
+	"github.com/pkg/errors"
+
+	"github.com/local/bar"
+	"golang.org/x/tools/cover"
+
+	"github.com/sirupsen/logrus"
+	"context"
+)
+
+func main() {
+	_, _, _, _, _, _ = testing.T, logrus.Entry, context.Context, meta.AnyGroup, fmt.Printf, errors.Frame
+	_, _ = foo.Foo, bar.Bar
+}
+`,
+		out: `package main
+
+import (
+	"context"
+	"fmt"
+	"testing"
+
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/api/meta"
+
+	"github.com/local/bar"
+	"local/foo"
+)
+
+func main() {
+	_, _, _, _, _, _ = testing.T, logrus.Entry, context.Context, meta.AnyGroup, fmt.Printf, errors.Frame
+	_, _ = foo.Foo, bar.Bar
+}
+`,
+	},
 }
 
 func TestSimpleCases(t *testing.T) {
@@ -1284,6 +1431,7 @@ func bar() {
 `,
 		},
 	}
+	LocalPrefix = "local,github.com/local"
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
